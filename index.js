@@ -1,5 +1,25 @@
 import express from "express";
 import path from "path";
+import mongoose from "mongoose";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+
+mongoose
+  .connect("mongodb://localhost:27017", {
+    dbName: "myDB",
+  })
+  .then(() => console.log("Database connected"))
+  .catch((e) => console.log(e));
+
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  password: String,
+});
+
+const User = mongoose.model("User", userSchema);
+
 const app = express();
 
 const users = [];
@@ -7,13 +27,46 @@ const users = [];
 //using middlewares
 app.use(express.static(path.join(path.resolve(), "./public")));
 app.use(express.urlencoded({ extended: true }));
-
+app.use(cookieParser());
 // 500 -> internal server error
 // 400 -> Not found
 // set up view engine
 app.set("view engine", "ejs");
 
-app.get("/", (req, res, next) => {
+//middleware
+const isAuthenticated = async (req, res, next) => {
+  const { token } = req.cookies;
+  console.log(token);
+  if (token) {
+    const decoded = jwt.verify(token, "abc");
+    console.log(decoded);
+    //req ke saath attach krdiya user ki info
+    req.user = await User.findById(decoded.id);
+    next();
+  } else {
+    res.redirect("/login");
+  }
+};
+
+// app.get("/add", async (req, res) => {
+//   try {
+//     await Message.create({ name: "Zaid", email: "Sample@gmail.com" });
+//     console.log("Data Added");
+//   } catch (err) {
+//     console.log(err.message);
+//   }
+//   res.send("Nice");
+// });
+
+app.get("/", isAuthenticated, (req, res, next) => {
+  console.log(req.user);
+  res.render("logout", { name: req.user.name });
+  // const { token } = req.cookies;
+  // if (token) {
+  //   res.render("logout");
+  // } else {
+  //   res.render("login");
+  // }
   //   res.send("Hi");
   //   res.sendStatus(404);
   //   res.json({
@@ -26,28 +79,102 @@ app.get("/", (req, res, next) => {
   //   const pathLocation = path.resolve();
   //   console.log(path.join(pathLocation, "./index.html"));
   //   res.sendFile(path.join(pathLocation, "./index.html"));
-  res.render("index", { name: "Zaid" });
   //   res.sendFile("index");
 });
 
-app.post("/contact", (req, res) => {
-  //   console.log("Post Method");
-  //   console.log(req.body.name);
-  //   console.log(req.body.email);
-  users.push({ username: req.body.name, email: req.body.email });
-  res.redirect("/success");
-  //   res.render("success");
-});
-
-app.get("/users", (req, res) => {
-  res.json({
-    users,
+app.get("/logout", (req, res) => {
+  res.cookie("token", null, {
+    //client side pr message nhi kr skte only server
+    httpOnly: true,
+    expires: new Date(Date.now()),
   });
+  console.log("logout page");
+  res.redirect("/");
 });
 
-app.get("/success", (req, res) => {
-  res.render("success");
+app.get("/login", (req, res) => {
+  res.render("login");
 });
+
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  let user = await User.findOne({ email });
+
+  if (!user) return res.redirect("/register");
+
+  const isMatch = await bcrypt.compare(password, user.password);
+
+  if (!isMatch)
+    return res.render("login", { email, message: "Incorrect Password" });
+
+  const token = jwt.sign({ id: user._id }, "abc");
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    expires: new Date(Date.now() + 60 * 1000),
+  });
+
+  res.redirect("/");
+});
+
+app.get("/register", (req, res) => {
+  res.render("register");
+});
+
+app.post("/register", async (req, res) => {
+  const { name, email, password } = req.body;
+
+  let user = await User.findOne({ email });
+
+  if (user) {
+    return res.redirect("/login");
+  }
+  console.log(password);
+  const hashedPassword = await bcrypt.hash(password, 10);
+  user = await User.create({
+    name,
+    email,
+    password:hashedPassword,
+  });
+
+  console.log(user);
+  const token = jwt.sign({ id: user._id }, "abc");
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    expires: new Date(Date.now() + 60 * 1000),
+  });
+
+  res.redirect("/");
+});
+
+// app.post("/contact", async (req, res) => {
+//   //   console.log("Post Method");
+//   //   console.log(req.body.name);
+//   //   console.log(req.body.email);
+//   const userData = { username: req.body.name, email: req.body.email };
+//   console.log(userData);
+//   try {
+//     await Message.create({ name: userData.username, email: userData.email });
+//     console.log("Data Added");
+//     res.redirect("/success");
+//   } catch (err) {
+//     console.log(err.message);
+//     res.status(404).send("Error");
+//   }
+//   //   res.render("success");
+// });
+
+// app.get("/users", (req, res) => {
+//   res.json({
+//     users,
+//   });
+// });
+
+// app.get("/success", (req, res) => {
+//   res.render("success");
+// });
 
 app.listen(5000, () => {
   console.log("Server running");

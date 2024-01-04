@@ -1,3 +1,5 @@
 server = localhost:5000
 api -> function -> route
 database -> store
+form -> name = {name} and submit it 
+the data will be present in req.body
